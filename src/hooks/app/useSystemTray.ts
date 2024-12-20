@@ -9,7 +9,7 @@ import {
 } from '@app/utils';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatHashrate, formatNumber, FormatPreset } from '@app/utils';
 import { MenuItem } from '@tauri-apps/api/menu/menuItem';
@@ -44,6 +44,8 @@ export function useUpdateSystemTray() {
         }
     }, []);
 
+    const minimized = useRef(false);
+
     const items = useMemo(() => {
         const { cpu, gpu } = metrics || {};
         const cpu_h = cpu?.mining?.hash_rate || 0;
@@ -61,24 +63,35 @@ export function useUpdateSystemTray() {
     }, [metrics, totalEarningsFormatted]);
 
     useEffect(() => {
+        // Run once on mount
         items.forEach(async (item) => {
             await updateMenuItem({ ...item });
         });
-    }, [items, updateMenuItem]);
+
+        // Run every 10 seconds after
+        const intervalId = setInterval(() => {
+            items.forEach(async (item) => {
+                await updateMenuItem({ ...item });
+            });
+        }, 10000);
+
+        return () => clearInterval(intervalId);
+    }, []);
 
     useEffect(() => {
         const ul = listen('miner_metrics', async ({ payload }) => {
-            const minimized = await currentWindow.isMinimized();
-
             if (payload) {
                 setMetrics(payload as MinerMetrics);
             }
 
-            await updateMenuItemEnabled(UNMINIMIZE_ITEM_ID, minimized);
-            await updateMenuItemEnabled(MINIMIZE_ITEM_ID, !minimized);
+            if ((await currentWindow.isMinimized()) != minimized.current) {
+                minimized.current = !minimized;
+                await updateMenuItemEnabled(UNMINIMIZE_ITEM_ID, minimized.current);
+                await updateMenuItemEnabled(MINIMIZE_ITEM_ID, !minimized.current);
+            }
         });
         return () => {
             ul.then((unlisten) => unlisten());
         };
-    }, [updateMenuItemEnabled]);
+    }, [minimized, updateMenuItemEnabled]);
 }
