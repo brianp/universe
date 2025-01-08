@@ -90,6 +90,7 @@ dirs = "5.0.1"
 tauri-plugin-process = { git = "https://github.com/tari-project/tauri-plugins-workspace", rev = "09f29b0abe2cb1eb81365b65a3aa3f73325e4e17" }
 ring = "0.17.8"
 hex = "0.4.3"
+home = "=0.5.9"
 
 # temporary fix for openssl
 openssl = { version = "0.10", features = ["vendored"] }

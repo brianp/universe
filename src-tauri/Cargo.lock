@@ -6919,6 +6919,7 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "hex",
+ "home",
  "jsonwebtoken",
  "keyring",
  "libsqlite3-sys",
