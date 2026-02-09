@@ -20,6 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use crate::configs::config_core::ConfigCore;
+use crate::node::chain_data_path::chain_data_dir;
 use crate::setup::setup_manager::{SetupManager, SetupPhase};
 use crate::LOG_TARGET_APP_LOGIC;
 use dunce::canonicalize;
@@ -29,7 +30,8 @@ use fs_more::directory::{
     DirectoryMoveOptions, SymlinkBehaviour,
 };
 use fs_more::file::CollidingFileBehaviour;
-use log::{error, info};
+use log::{error, info, warn};
+use std::fs;
 use tauri::ipc::InvokeError;
 
 pub async fn update_data_location(to_path: String) -> Result<(), InvokeError> {
@@ -46,42 +48,59 @@ pub async fn update_data_location(to_path: String) -> Result<(), InvokeError> {
         },
     };
     match canonicalize(to_path) {
-        Ok(new_dir) => match ConfigCore::update_node_data_directory(new_dir.clone()).await {
+        Ok(new_dir) => match ConfigCore::update_chain_data_directory(new_dir.clone()).await {
             Ok(previous) => {
                 if let Some(previous) = previous {
+                    let source_dir = chain_data_dir(&previous, None);
+                    let destination_dir = chain_data_dir(&new_dir, None);
+
+                    if !source_dir.exists() {
+                        info!(target: LOG_TARGET_APP_LOGIC, "No existing chain data at {source_dir:?}, skipping move");
+                        return Ok(());
+                    }
+
                     SetupManager::get_instance()
-                        .shutdown_phases(vec![SetupPhase::Wallet, SetupPhase::Node])
+                        .shutdown_phases(vec![SetupPhase::Node])
                         .await;
 
-                    let source_dir = previous.join("node");
-                    let destination_dir = new_dir.join("node");
+                    if let Some(parent) = destination_dir.parent() {
+                        fs::create_dir_all(parent).map_err(|e| {
+                            error!(target: LOG_TARGET_APP_LOGIC, "Could not create destination directory: {e}");
+                            InvokeError::from(e.to_string())
+                        })?;
+                    }
 
                     match move_directory(source_dir, destination_dir, move_options) {
                         Ok(res) => {
-                            info!(target: LOG_TARGET_APP_LOGIC, "Successfully moved items - Total bytes: {}, Directories: {:?}", res.total_bytes_moved, res.directories_moved);
+                            info!(target: LOG_TARGET_APP_LOGIC, "Successfully moved chain data - Total bytes: {}, Directories: {:?}", res.total_bytes_moved, res.directories_moved);
                         }
                         Err(e) => {
-                            error!(target: LOG_TARGET_APP_LOGIC, "Could not move items, reverting config change: {e}");
-                            ConfigCore::update_node_data_directory(previous)
+                            error!(target: LOG_TARGET_APP_LOGIC, "Could not move chain data, reverting config change: {e}");
+                            ConfigCore::update_chain_data_directory(previous)
                                 .await
                                 .map_err(|e| InvokeError::from(e.to_string()))?;
+
+                            warn!(target: LOG_TARGET_APP_LOGIC, "[ set_custom_node_directory ] restarting node after failed move");
+                            SetupManager::get_instance()
+                                .resume_phases(vec![SetupPhase::Node])
+                                .await;
                             return Err(InvokeError::from(e.to_string()));
                         }
                     };
 
-                    info!(target: LOG_TARGET_APP_LOGIC, "[ set_custom_node_directory ] restarting phases");
+                    info!(target: LOG_TARGET_APP_LOGIC, "[ set_custom_node_directory ] restarting node phase");
                     SetupManager::get_instance()
-                        .resume_phases(vec![SetupPhase::Wallet, SetupPhase::Node])
+                        .resume_phases(vec![SetupPhase::Node])
                         .await;
                 }
             }
             Err(e) => {
-                error!(target: LOG_TARGET_APP_LOGIC, "Could not update node data location: {e}");
+                error!(target: LOG_TARGET_APP_LOGIC, "Could not update chain data location: {e}");
                 return Err(InvokeError::from(e.to_string()));
             }
         },
         Err(e) => {
-            error!(target: LOG_TARGET_APP_LOGIC, "New node directory does not exist: {e}");
+            error!(target: LOG_TARGET_APP_LOGIC, "New chain data directory does not exist: {e}");
             return Err(InvokeError::from(e.to_string()));
         }
     }
