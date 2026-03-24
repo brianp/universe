@@ -140,7 +140,7 @@ export const WalletBalance = () => {
 
 export const WalletBalanceHidden = () => {
     return (
-        <Wrapper data-testid="wallet-balance" data-mode="exchange">
+        <Wrapper data-testid="wallet-balance-exchange" data-mode="exchange">
             <BalanceWrapper>
                 <BalanceTextWrapper>
                     <Hidden>{`*******`}</Hidden>

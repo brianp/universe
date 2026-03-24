@@ -25,7 +25,7 @@
 
 #![cfg(feature = "test-mode")]
 
-use log::{error, info};
+use log::{error, info, warn};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Listener;
@@ -80,11 +80,19 @@ pub fn start_headless(handle_clone: AppHandle) {
         // WS client is connected. Periodically replay them so late
         // joiners get the full picture.
         tauri::async_runtime::spawn(async {
-            // Run indefinitely — new WS clients can connect at any time
-            // during the test session and need the initial state.
+            let mut shutdown_signal = crate::tasks_tracker::TasksTrackers::current()
+                .common
+                .get_signal()
+                .await;
             let mut i = 0u64;
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {},
+                    _ = shutdown_signal.wait() => {
+                        info!(target: LOG_TARGET_APP_LOGIC, "Headless: shutdown signal received, stopping state re-emit loop");
+                        break;
+                    }
+                }
 
                 // Re-emit all config events
                 EventsEmitter::emit_core_config_loaded(&ConfigCore::content().await).await;
@@ -140,7 +148,7 @@ async fn start_remote_ui(handle: &AppHandle) {
         .set_port(Some(9515))
         .enable_application_ui();
     if std::env::var("REMOTE_UI_BIND_ALL").as_deref() == Ok("1") {
-        info!(target: LOG_TARGET_APP_LOGIC, "REMOTE_UI_BIND_ALL set: binding remote-ui to 0.0.0.0");
+        warn!(target: LOG_TARGET_APP_LOGIC, "REMOTE_UI_BIND_ALL set: binding remote-ui to 0.0.0.0 — WebSocket will be exposed to ALL network interfaces with NO authentication");
         config = config.set_allowed_origin(tauri_remote_ui::OriginType::Any);
     }
     if let Err(e) = handle.start_remote_ui(config).await {
