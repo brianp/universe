@@ -74,7 +74,7 @@ function initWebSocket() {
         socket.onmessage = ({ data }) => {
             try {
                 const json_data = JSON.parse(data);
-                if (json_data.id && filterCollection[json_data.id]) {
+                if (json_data.id && Object.hasOwn(filterCollection, json_data.id)) {
                     try {
                         filterCollection[json_data.id](JSON.parse(json_data.payload));
                     } catch {
